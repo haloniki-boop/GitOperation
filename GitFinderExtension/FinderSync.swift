@@ -126,9 +126,8 @@ final class FinderSync: FIFinderSync {
             return nil
         }
 
-        let root = NSMenu(title: "Git操作")
-        let parent = NSMenuItem(title: "Git操作", action: nil, keyEquivalent: "")
         let submenu = NSMenu(title: "Git操作")
+        submenu.addItem(.separator())
 
         let controller = FIFinderSyncController.default()
         let reportedSelectedItems = controller.selectedItemURLs() ?? []
@@ -209,12 +208,14 @@ final class FinderSync: FIFinderSync {
         submenu.addItem(.separator())
         add("Git対象フォルダを追加…", action: #selector(addGitTargetFolders), to: submenu)
         add("Finder拡張機能を有効にする…", action: #selector(enableFinderExtension), to: submenu)
-        add("設定…", action: #selector(openSettings), to: submenu)
+        add("Git設定…", action: #selector(openSettings), to: submenu)
         add("バージョン情報", action: #selector(showAbout), to: submenu)
+        submenu.addItem(.separator())
 
-        parent.submenu = submenu
-        root.addItem(parent)
-        return root
+        // Finder already supplies the extension's top-level menu entry. Do
+        // not wrap this menu in another "Git操作" item, otherwise Finder
+        // renders the label twice in the contextual menu.
+        return submenu
     }
 
     private func add(_ title: String, action: Selector, to menu: NSMenu, enabled: Bool = true) {

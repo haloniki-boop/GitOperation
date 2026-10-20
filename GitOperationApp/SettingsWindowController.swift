@@ -38,7 +38,7 @@ final class SettingsWindowController: NSWindowController {
             defer: false
         )
         self.init(window: window)
-        window.title = "Git操作 — 設定"
+        window.title = "Git設定"
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.moveToActiveSpace)
         window.center()
@@ -70,7 +70,7 @@ final class SettingsWindowController: NSWindowController {
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = NSTextField(labelWithString: "GitHubリポジトリ作成")
+        let heading = NSTextField(labelWithString: "Git設定")
         heading.font = .systemFont(ofSize: 24, weight: .bold)
         stack.addArrangedSubview(heading)
 
@@ -163,7 +163,6 @@ final class SettingsWindowController: NSWindowController {
         do {
             let root = try service.initializeRepositoryDefaults(at: url)
             loadRepository(root)
-            tryLoadDotEnv(showSuccess: false)
         } catch {
             showError(error)
         }
@@ -171,7 +170,13 @@ final class SettingsWindowController: NSWindowController {
 
     private func loadRepository(_ url: URL) {
         do {
-            let settings = try service.repositorySettings(at: url)
+            let selectedURL = directoryURL(for: url)
+            let root = (try? service.repositoryRoot(containing: selectedURL)) ?? selectedURL
+            // Opening Settings is also a lightweight repair pass: initialize
+            // the selected folder only when it is not already inside another
+            // repository, then restore the expected branch and local identity.
+            let preparedRoot = try service.initializeRepositoryDefaults(at: root)
+            let settings = try service.repositorySettings(at: preparedRoot)
             repositoryURL = settings.repositoryRoot
             repositoryLabel.stringValue = settings.repositoryRoot.path
             branchLabel.stringValue = settings.currentBranch.isEmpty ? "（detached HEAD）" : settings.currentBranch
@@ -190,10 +195,33 @@ final class SettingsWindowController: NSWindowController {
             connectionLabel.stringValue = "未確認"
             connectionLabel.textColor = .secondaryLabelColor
             setEnabled(true)
-            if !settings.originURL.isEmpty { verifyGitHubConnection() }
+            setGitHubRepositoryButtonsHidden(!settings.originURL.isEmpty)
+            tryLoadDotEnv(showSuccess: false)
+            if !settings.originURL.isEmpty {
+                verifyGitHubConnection()
+            } else {
+                createGitHubRepositoryIfNeeded()
+            }
         } catch {
             showError(error)
         }
+    }
+
+    private func directoryURL(for url: URL) -> URL {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return url.standardizedFileURL
+        }
+        return url.deletingLastPathComponent().standardizedFileURL
+    }
+
+    private func createGitHubRepositoryIfNeeded() {
+        guard !githubToken.isEmpty,
+              !githubUsernameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !repositoryNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        createGitHubRepository()
     }
 
     @objc private func saveSettings() {
@@ -250,6 +278,7 @@ final class SettingsWindowController: NSWindowController {
             try ensureDotEnvIsIgnored(at: repositoryURL)
             envStatusLabel.stringValue = "読込済み（トークンは非表示）"
             envStatusLabel.textColor = .systemGreen
+            loadEnvButton.isHidden = true
             if showSuccess {
                 showMessage(".envを読み込みました", detail: "作業者情報とGitHubユーザー名を反映しました。トークンは画面やGit設定へ保存しません。")
             }
@@ -257,6 +286,7 @@ final class SettingsWindowController: NSWindowController {
             githubToken = ""
             envStatusLabel.stringValue = "読込失敗"
             envStatusLabel.textColor = .systemRed
+            loadEnvButton.isHidden = false
             if showSuccess { showError(error) }
         }
     }
@@ -311,6 +341,7 @@ final class SettingsWindowController: NSWindowController {
                 self.originField.stringValue = repository.cloneURL
                 self.connectionLabel.stringValue = "接続成功 — GitHubリポジトリを作成して確認しました"
                 self.connectionLabel.textColor = .systemGreen
+                self.setGitHubRepositoryButtonsHidden(true)
                 self.showMessage("GitHubリポジトリを作成しました", detail: repository.cloneURL)
             } catch {
                 self.connectionLabel.stringValue = "作成／接続失敗 — \(error.localizedDescription)"
@@ -426,7 +457,14 @@ final class SettingsWindowController: NSWindowController {
         envStatusLabel.stringValue = "未読込"
         connectionLabel.stringValue = "未確認"
         connectionLabel.textColor = .secondaryLabelColor
+        loadEnvButton.isHidden = false
+        setGitHubRepositoryButtonsHidden(false)
         setEnabled(false)
+    }
+
+    private func setGitHubRepositoryButtonsHidden(_ hidden: Bool) {
+        createButton.isHidden = hidden
+        checkButton.isHidden = hidden
     }
 
     private func setEnabled(_ enabled: Bool) {
